@@ -232,7 +232,42 @@ class KGW(BaseWatermark):
         # Decode
         watermarked_text = self.config.generation_tokenizer.batch_decode(encoded_watermarked_text, skip_special_tokens=True)[0]
         return watermarked_text
-    
+
+    def generate_watermarked_text_batch(self, prompts: list[str], *args, **kwargs) -> list[str]:
+        """
+        Generate watermarked text for a batch of prompts.
+        
+        Args:
+            prompts: A list of prompt strings to process
+            *args: Additional positional arguments to pass to the generation model
+            **kwargs: Additional keyword arguments to pass to the generation model
+        
+        Returns:
+            A list of generated watermarked text outputs corresponding to each input prompt
+        """
+        from functools import partial
+        from transformers import LogitsProcessorList
+        
+        # Configure generate_with_watermark
+        generate_with_watermark = partial(
+            self.config.generation_model.generate,
+            logits_processor=LogitsProcessorList([self.logits_processor]), 
+            **self.config.gen_kwargs
+        )
+        
+        # Encode batch of prompts
+        encoded_prompts = self.config.generation_tokenizer(prompts, return_tensors="pt", 
+                                                        padding=True, truncation=True, 
+                                                        add_special_tokens=True).to(self.config.device)
+        
+        # Generate watermarked text for the batch
+        encoded_watermarked_texts = generate_with_watermark(**encoded_prompts)
+        
+        # Decode all outputs
+        watermarked_texts = self.config.generation_tokenizer.batch_decode(encoded_watermarked_texts, skip_special_tokens=True)
+        
+        return watermarked_texts
+
     def detect_watermark(self, text: str, return_dict: bool = True, *args, **kwargs):
         """Detect watermark in the text."""
 

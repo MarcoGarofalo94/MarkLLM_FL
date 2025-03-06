@@ -83,6 +83,32 @@ class BaseWatermark:
         unwatermarked_text = self.config.generation_tokenizer.batch_decode(encoded_unwatermarked_text, skip_special_tokens=True)[0]
         return unwatermarked_text
 
+    def generate_unwatermarked_text_batch(self, prompts: list[str], *args, **kwargs) -> list[str]:
+        """
+        Generate unwatermarked text for a batch of prompts.
+        
+        Args:
+            prompts: A list of prompt strings to process
+            *args: Additional positional arguments to pass to the generation model
+            **kwargs: Additional keyword arguments to pass to the generation model
+        
+        Returns:
+            A list of generated unwatermarked text outputs corresponding to each input prompt
+        """
+        
+        # Encode batch of prompts
+        encoded_prompts = self.config.generation_tokenizer(prompts, return_tensors="pt", 
+                                                        padding=True, truncation=True, 
+                                                        add_special_tokens=True).to(self.config.device)
+        
+        # Generate unwatermarked text for the batch
+        encoded_unwatermarked_texts = self.config.generation_model.generate(**encoded_prompts, **self.config.gen_kwargs)
+        
+        # Decode all outputs
+        unwatermarked_texts = self.config.generation_tokenizer.batch_decode(encoded_unwatermarked_texts, skip_special_tokens=True)
+        
+        return unwatermarked_texts
+
     def detect_watermark(self, text:str, return_dict: bool=True, *args, **kwargs) -> Union[tuple, dict]:
         pass
 
