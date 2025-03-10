@@ -44,7 +44,7 @@ class BaseConfig:
             self.config_dict.update(kwargs)
             
         # Load model-related configurations
-        self.generation_model = transformers_config.model
+        self.generation_model = transformers_config.model if hasattr(transformers_config, 'model') else None
         self.generation_tokenizer = transformers_config.tokenizer
         self.vocab_size = transformers_config.vocab_size
         self.device = transformers_config.device
