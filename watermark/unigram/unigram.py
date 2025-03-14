@@ -187,6 +187,41 @@ class Unigram(BaseWatermark):
         # decode
         watermarked_text = self.config.generation_tokenizer.batch_decode(encoded_watermarked_text, skip_special_tokens=True)[0]
         return watermarked_text
+    
+    def generate_watermarked_text_batch(self, prompts: list[str], *args, **kwargs) -> list[str]:
+        """
+        Generate watermarked text for a batch of prompts.
+        
+        Args:
+            prompts: A list of prompt strings to process
+            *args: Additional positional arguments to pass to the generation model
+            **kwargs: Additional keyword arguments to pass to the generation model
+        
+        Returns:
+            A list of generated watermarked text outputs corresponding to each input prompt
+        """
+        from functools import partial
+        from transformers import LogitsProcessorList
+        
+        # Configure generate_with_watermark
+        generate_with_watermark = partial(
+            self.config.generation_model.generate,
+            logits_processor=LogitsProcessorList([self.logits_processor]), 
+            **self.config.gen_kwargs
+        )
+        
+        # Encode batch of prompts
+        encoded_prompts = self.config.generation_tokenizer(prompts, return_tensors="pt", 
+                                                        padding=True, truncation=True, 
+                                                        add_special_tokens=True).to(self.config.device)
+        
+        # Generate watermarked text for the batch
+        encoded_watermarked_texts = generate_with_watermark(**encoded_prompts)
+        
+        # Decode all outputs
+        watermarked_texts = self.config.generation_tokenizer.batch_decode(encoded_watermarked_texts, skip_special_tokens=True)
+        
+        return watermarked_texts
         
     def detect_watermark(self, text: str, return_dict: bool = True, *args, **kwargs) -> Union[tuple, dict]:
         """Detect watermark in the given text."""
@@ -205,6 +240,23 @@ class Unigram(BaseWatermark):
             return {"is_watermarked": is_watermarked, "score": z_score}
         else:
             return (is_watermarked, z_score)
+
+    def detect_watermark_batch(self, texts, return_dict=True, *args, **kwargs):
+        results = []
+        # Process each text separately but keep them on GPU for parallelization
+        for text in texts:
+            result = self.detect_watermark(text, return_dict=return_dict)
+            results.append(result)
+        
+        # Reformat results to match batch structure
+        if return_dict:
+            return {
+                "is_watermarked": [r["is_watermarked"] for r in results],
+                "score": [r["score"] for r in results],
+                "green_token_flags": [r.get("green_token_flags", None) for r in results]
+            }
+        else:
+            return ([r[0] for r in results], [r[1] for r in results])
     
     def get_data_for_visualization(self, text: str, *args, **kwargs) -> tuple[list[str], list[int]]:
         """Get data for visualization."""

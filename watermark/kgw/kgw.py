@@ -149,6 +149,56 @@ class KGWUtils:
         z_score = self._compute_z_score(green_token_count, num_tokens_scored)
         return z_score, green_token_flags
 
+    def score_sequence_batch(self, batch_input_ids: torch.Tensor) -> tuple[torch.Tensor, list[list[int]]]:
+        """
+        Score a batch of input_ids and return z_scores and green_token_flags for each sequence.
+        
+        Args:
+            batch_input_ids: Tensor of shape [batch_size, seq_length] containing token IDs
+            
+        Returns:
+            Tuple of (z_scores, green_token_flags_batch) where:
+            - z_scores is a tensor of shape [batch_size] containing the z-score for each sequence
+            - green_token_flags_batch is a list of lists containing flags for each token in each sequence
+        """
+        batch_size = batch_input_ids.shape[0]
+        z_scores = []
+        green_token_flags_batch = []
+        
+        # Process each sequence in the batch
+        for b in range(batch_size):
+            input_ids = batch_input_ids[b]
+            
+            # Filter out padding tokens if any
+            if 0 in input_ids:  # Assuming 0 is the padding token
+                input_ids = input_ids[:torch.where(input_ids == 0)[0][0]]
+                
+            num_tokens_scored = len(input_ids) - self.config.prefix_length
+            if num_tokens_scored < 1:
+                raise ValueError(
+                    f"Must have at least 1 token to score after "
+                    f"the first min_prefix_len={self.config.prefix_length} tokens required by the seeding scheme."
+                )
+
+            green_token_count = 0
+            green_token_flags = [-1 for _ in range(self.config.prefix_length)]
+
+            for idx in range(self.config.prefix_length, len(input_ids)):
+                curr_token = input_ids[idx]
+                greenlist_ids = self.get_greenlist_ids(input_ids[:idx])
+                if curr_token in greenlist_ids:
+                    green_token_count += 1
+                    green_token_flags.append(1)
+                else:
+                    green_token_flags.append(0)
+            
+            z_score = self._compute_z_score(green_token_count, num_tokens_scored)
+            z_scores.append(z_score)
+            green_token_flags_batch.append(green_token_flags)
+        
+        return torch.tensor(z_scores, device=batch_input_ids.device), green_token_flags_batch
+
+
 
 class KGWLogitsProcessor(LogitsProcessor):
     """LogitsProcessor for KGW algorithm, process logits to add watermark."""
@@ -285,6 +335,23 @@ class KGW(BaseWatermark):
             return {"is_watermarked": is_watermarked, "score": z_score}
         else:
             return (is_watermarked, z_score)
+
+    def detect_watermark_batch(self, texts, return_dict=True, *args, **kwargs):
+        results = []
+        # Process each text separately but keep them on GPU for parallelization
+        for text in texts:
+            result = self.detect_watermark(text, return_dict=return_dict)
+            results.append(result)
+        
+        # Reformat results to match batch structure
+        if return_dict:
+            return {
+                "is_watermarked": [r["is_watermarked"] for r in results],
+                "score": [r["score"] for r in results],
+                "green_token_flags": [r.get("green_token_flags", None) for r in results]
+            }
+        else:
+            return ([r[0] for r in results], [r[1] for r in results])
         
     def get_data_for_visualization(self, text: str, *args, **kwargs) -> tuple[list[str], list[int]]:
         """Get data for visualization."""
